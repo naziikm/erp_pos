@@ -18,6 +18,17 @@ class LicenseActivateResponse(BaseModel):
     features: Optional[dict] = None
 
 
+class LicenseGenerateRequest(BaseModel):
+    machine_id: str
+    duration_years: int = 1
+    expiry_date: Optional[str] = None
+    secret_key: str
+
+
+class LicenseGenerateResponse(BaseModel):
+    activation_key: str
+
+
 class LicenseStatusResponse(BaseModel):
     is_valid: bool
     expires_at: Optional[datetime] = None

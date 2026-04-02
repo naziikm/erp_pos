@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -15,16 +17,48 @@ from app.models.models import (
     PosInvoice, PosPayment, InvoiceSyncQueue,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/session", tags=["Session"])
 
 
 def get_active_session(db: Session, user_id: int):
-    """Get the active POS opening entry for the user."""
+    """Get the active POS opening entry for the user.
+
+    First tries to find an entry assigned to the specific user.
+    Falls back to any Open entry if no user-specific match is found,
+    since in many POS setups the opening entry is created by a manager
+    and any cashier should be able to use it.
+    """
+    # Try user-specific match first
     entry = (
         db.query(ERPPosOpeningEntry)
         .filter(ERPPosOpeningEntry.cashier_id == user_id, ERPPosOpeningEntry.status == "Open")
         .first()
     )
+    if entry:
+        logger.info("Found active session %s for user_id=%d (direct match)", entry.name, user_id)
+        return entry
+
+    # Fallback: any Open entry (common in single-device setups where
+    # a manager opens the session and a different cashier bills)
+    entry = (
+        db.query(ERPPosOpeningEntry)
+        .filter(ERPPosOpeningEntry.status == "Open")
+        .first()
+    )
+    if entry:
+        logger.info(
+            "Found active session %s via fallback (entry cashier_id=%s, requesting user_id=%d)",
+            entry.name, entry.cashier_id, user_id,
+        )
+    else:
+        # Log diagnostic information
+        total = db.query(ERPPosOpeningEntry).count()
+        logger.warning(
+            "No active session for user_id=%d. Total opening entries in DB: %d",
+            user_id, total,
+        )
     return entry
 
 
@@ -54,12 +88,20 @@ def session_status(
     db: Session = Depends(get_db),
 ):
     """Check for active POS opening entry."""
+    logger.info("Session status check for user_id=%d username=%s", current_user.id, current_user.username)
     entry = get_active_session(db, current_user.id)
     if not entry:
+        logger.info("Returning has_session=False for user_id=%d", current_user.id)
         return SessionStatusResponse(has_session=False, session=None)
 
     profile = entry.pos_profile
     price_list_name = profile.default_price_list.name if profile and profile.default_price_list else None
+
+    # Coerce nullable flags to sensible defaults so Pydantic receives
+    # valid data types even if the DB row has NULLs.
+    validate_stock_flag = False
+    if profile and profile.validate_stock is not None:
+        validate_stock_flag = bool(profile.validate_stock)
 
     session_info = SessionInfo(
         opening_entry_name=entry.name,
@@ -69,7 +111,7 @@ def session_status(
         period_start_date=entry.period_start_date,
         allowed_modes_of_payment=profile.allowed_modes_of_payment if profile else [],
         default_price_list=price_list_name,
-        validate_stock=profile.validate_stock if profile else False,
+        validate_stock=validate_stock_flag,
         printer_type=profile.printer_type if profile else None,
     )
     return SessionStatusResponse(has_session=True, session=session_info)

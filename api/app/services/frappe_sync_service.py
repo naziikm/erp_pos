@@ -297,6 +297,10 @@ def _sync_modes_of_payment(db: Session, erp: ERPClient, last_synced: datetime | 
 
 
 def _sync_pos_profiles(db: Session, erp: ERPClient, last_synced: datetime | None):
+    # Core POS Profile fields used by the POS app. We intentionally keep
+    # this field list minimal because some ERPNext versions do not expose
+    # all flags (like validate_stock) via list queries and may respond
+    # with HTTP 417 when unknown fields are requested.
     fields = ["name", "company", "warehouse", "selling_price_list", "modified"]
     filters = [["modified", ">", last_synced.isoformat()]] if last_synced else None
     rows = _get_erp_list(erp, "POS Profile", fields, filters)
@@ -321,7 +325,11 @@ def _sync_pos_profiles(db: Session, erp: ERPClient, last_synced: datetime | None
             existing.warehouse = row.get("warehouse")
             existing.default_price_list_id = pl.id if pl else existing.default_price_list_id
             existing.allowed_modes_of_payment = allowed_mops or existing.allowed_modes_of_payment
-            existing.customer_required = bool(row.get("customer_required"))
+            # Coerce flags to bool when present; otherwise keep existing
+            # values so that any manually-populated settings are
+            # preserved.
+            if "customer_required" in row:
+                existing.customer_required = bool(row.get("customer_required"))
             existing.modified = row.get("modified")
             existing.synced_at = datetime.utcnow()
         else:
@@ -331,7 +339,8 @@ def _sync_pos_profiles(db: Session, erp: ERPClient, last_synced: datetime | None
                 warehouse=row.get("warehouse"),
                 default_price_list_id=pl.id if pl else None,
                 allowed_modes_of_payment=allowed_mops,
-                customer_required=bool(row.get("customer_required")),
+                customer_required=bool(row.get("customer_required")) if "customer_required" in row else False,
+                validate_stock=bool(row.get("validate_stock")),
                 modified=row.get("modified"),
                 synced_at=datetime.utcnow(),
             ))
@@ -340,10 +349,26 @@ def _sync_pos_profiles(db: Session, erp: ERPClient, last_synced: datetime | None
 
 
 def _sync_pos_opening_entries(db: Session, erp: ERPClient, last_synced: datetime | None):
-    fields = ["name", "pos_profile", "user", "set_posting_date",
-              "status", "modified"]
+    """Sync POS Opening Entry records from ERPNext.
+
+    Notes:
+    - Uses period_start_date from ERPNext to populate period_start_date locally
+    - Treats only explicit "Open" as open; everything else becomes "Closed"
+    - Relies on modified timestamp for incremental sync
+    """
+
+    # ERPNext POS Opening Entry fields:
+    # - name
+    # - pos_profile (Link)
+    # - user (Link to User)
+    # - period_start_date (Datetime)
+    # - status (Open / Closed / Draft / Cancelled, etc.)
+    # - modified (Datetime)
+    fields = ["name", "pos_profile", "user", "period_start_date", "status", "modified"]
+
+    # Incremental sync based on modified timestamp
     filters = [["modified", ">", last_synced.isoformat()]] if last_synced else None
-    # Only sync Open entries or recently modified ones
+
     rows = _get_erp_list(erp, "POS Opening Entry", fields, filters)
     for row in rows:
         profile = db.query(ERPPosProfile).filter(ERPPosProfile.name == row.get("pos_profile")).first()
@@ -362,16 +387,18 @@ def _sync_pos_opening_entries(db: Session, erp: ERPClient, last_synced: datetime
         except Exception:
             pass
 
-        status = row.get("status", "Open")
-        if status not in ("Open", "Closed"):
-            status = "Open"
+        raw_status = (row.get("status") or "Open").strip()
+        # Only explicit "Open" is treated as an open session; anything
+        # else (Draft, Closed, Cancelled, etc.) is stored as Closed so it
+        # never counts as an active session in get_active_session.
+        status = "Open" if raw_status == "Open" else "Closed"
 
         existing = db.query(ERPPosOpeningEntry).filter(ERPPosOpeningEntry.name == row["name"]).first()
         if existing:
             existing.pos_profile_id = profile.id if profile else existing.pos_profile_id
             existing.cashier_id = user.id if user else existing.cashier_id
             existing.opening_balance = opening_balance or existing.opening_balance
-            existing.period_start_date = row.get("set_posting_date")
+            existing.period_start_date = row.get("period_start_date")
             existing.status = status
             existing.modified = row.get("modified")
             existing.synced_at = datetime.utcnow()
@@ -381,7 +408,7 @@ def _sync_pos_opening_entries(db: Session, erp: ERPClient, last_synced: datetime
                 pos_profile_id=profile.id if profile else None,
                 cashier_id=user.id if user else None,
                 opening_balance=opening_balance,
-                period_start_date=row.get("set_posting_date"),
+                period_start_date=row.get("period_start_date"),
                 status=status,
                 modified=row.get("modified"),
                 synced_at=datetime.utcnow(),

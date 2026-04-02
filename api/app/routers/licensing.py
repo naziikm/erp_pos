@@ -4,11 +4,25 @@ from app.database import get_db
 from app.schemas.schemas import (
     LicenseActivateRequest, LicenseActivateResponse,
     LicenseStatusResponse, SuccessResponse,
+    LicenseGenerateRequest, LicenseGenerateResponse,
 )
-from app.services.license_service import activate_license, check_license_validity, deactivate_license
+from app.services.license_service import activate_license, check_license_validity, deactivate_license, generate_activation_key
 from app.dependencies.license_deps import require_valid_license
 
 router = APIRouter(prefix="/license", tags=["License"])
+
+
+@router.post("/generate", response_model=LicenseGenerateResponse)
+def license_generate(req: LicenseGenerateRequest):
+    """Generate a new POS license key (Admin/Developer Tool). Requires matching secret key."""
+    from app.config import get_settings
+    settings = get_settings()
+    if req.secret_key != settings.LICENSE_HMAC_SECRET:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Invalid secret key")
+        
+    activation_key = generate_activation_key(req.machine_id, req.duration_years, req.expiry_date)
+    return LicenseGenerateResponse(activation_key=activation_key)
 
 
 @router.post("/activate", response_model=LicenseActivateResponse)
