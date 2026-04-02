@@ -103,13 +103,43 @@ def session_status(
     if profile and profile.validate_stock is not None:
         validate_stock_flag = bool(profile.validate_stock)
 
+    allowed_payment_modes = []
+    if profile and profile.allowed_modes_of_payment:
+        raw_modes = profile.allowed_modes_of_payment
+        if not isinstance(raw_modes, list):
+            raw_modes = []
+
+        mode_names = []
+        for raw_mode in raw_modes:
+            if isinstance(raw_mode, str) and raw_mode.strip():
+                mode_names.append(raw_mode.strip())
+            elif isinstance(raw_mode, dict):
+                mode_name = raw_mode.get("mode_of_payment") or raw_mode.get("name")
+                if mode_name:
+                    mode_names.append(str(mode_name).strip())
+
+        if mode_names:
+            mode_rows = (
+                db.query(ERPModeOfPayment)
+                .filter(ERPModeOfPayment.name.in_(mode_names))
+                .all()
+            )
+            mode_lookup = {row.name: row for row in mode_rows}
+            for mode_name in mode_names:
+                mode_row = mode_lookup.get(mode_name)
+                allowed_payment_modes.append({
+                    "id": mode_row.id if mode_row else None,
+                    "name": mode_name,
+                    "type": mode_row.type if mode_row else None,
+                })
+
     session_info = SessionInfo(
         opening_entry_name=entry.name,
         pos_profile_name=profile.name if profile else "",
         warehouse=profile.warehouse if profile else "",
         cashier_name=current_user.full_name or current_user.username,
         period_start_date=entry.period_start_date,
-        allowed_modes_of_payment=profile.allowed_modes_of_payment if profile else [],
+        allowed_modes_of_payment=allowed_payment_modes,
         default_price_list=price_list_name,
         validate_stock=validate_stock_flag,
         printer_type=profile.printer_type if profile else None,

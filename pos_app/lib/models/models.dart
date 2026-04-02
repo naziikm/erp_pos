@@ -24,7 +24,7 @@ class CartItem {
 }
 
 class PaymentEntry {
-  final int modeId;
+  final int? modeId;
   final String modeName;
   double amount;
   String? reference;

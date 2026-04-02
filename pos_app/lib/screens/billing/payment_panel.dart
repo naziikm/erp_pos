@@ -43,17 +43,35 @@ class _PaymentPanelState extends State<PaymentPanel> {
   void _initPaymentModes() {
     final modes =
         widget.session?['allowed_modes_of_payment'] as List<dynamic>? ?? [];
-    _payments = modes.map((m) {
-      return PaymentEntry(
-        modeId: m['id'] ?? 0,
-        modeName: m['mode_of_payment'] ?? m['name'] ?? '',
-      );
-    }).toList();
+    _payments = modes.map(_toPaymentEntry).whereType<PaymentEntry>().toList();
 
     // If only one mode (usually Cash), pre-fill the full amount
     if (_payments.length == 1) {
       _payments[0].amount = widget.grandTotal;
     }
+  }
+
+  PaymentEntry? _toPaymentEntry(dynamic rawMode) {
+    if (rawMode is String) {
+      final modeName = rawMode.trim();
+      if (modeName.isEmpty) return null;
+      return PaymentEntry(modeId: null, modeName: modeName);
+    }
+
+    if (rawMode is Map) {
+      final modeName = (rawMode['mode_of_payment'] ?? rawMode['name'] ?? '')
+          .toString()
+          .trim();
+      if (modeName.isEmpty) return null;
+
+      final rawId = rawMode['id'];
+      final modeId = rawId is int
+          ? rawId
+          : int.tryParse(rawId?.toString() ?? '');
+      return PaymentEntry(modeId: modeId, modeName: modeName);
+    }
+
+    return null;
   }
 
   double get _totalPaid => _payments.fold(0.0, (sum, p) => sum + p.amount);
@@ -84,23 +102,47 @@ class _PaymentPanelState extends State<PaymentPanel> {
           .map(
             (item) => {
               'item_id': item.itemId,
+              'item_code': item.itemCode,
+              'item_name': item.itemName,
               'qty': item.qty,
               'rate': item.rate,
-              'discount_percent': item.discountPercent,
+              'discount_percentage': item.discountPercent,
+              'amount': item.amount,
             },
           )
           .toList(),
       'payments': _payments
-          .where((p) => p.amount > 0)
+          .where((p) => p.amount > 0 && p.modeId != null)
           .map(
             (p) => {
               'mode_of_payment_id': p.modeId,
               'amount': p.amount,
-              'reference': p.reference,
+              'reference_number': p.reference,
             },
           )
           .toList(),
+      'net_total': widget.cart.fold<double>(
+        0,
+        (sum, item) => sum + (item.rate * item.qty),
+      ),
+      'total_discount': widget.cart.fold<double>(
+        0,
+        (sum, item) => sum + item.discountAmount,
+      ),
+      'grand_total': widget.grandTotal,
     };
+
+    final missingModeIds = _payments.any(
+      (p) => p.amount > 0 && p.modeId == null,
+    );
+    if (missingModeIds) {
+      setState(() {
+        _loading = false;
+        _error =
+            'Payment modes are outdated. Refresh the session and try again.';
+      });
+      return;
+    }
 
     try {
       final result = await _billingService.createInvoice(payload);

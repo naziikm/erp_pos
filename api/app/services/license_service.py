@@ -12,6 +12,37 @@ from app.utils.error_logger import log_error
 settings = get_settings()
 
 
+def generate_activation_key(
+    machine_id: str,
+    duration_years: int = 1,
+    expiry_date: str | None = None,
+) -> str:
+    """Generate a signed activation key for a specific machine."""
+    if expiry_date:
+        expires_at = datetime.fromisoformat(expiry_date)
+    else:
+        expires_at = datetime.utcnow() + timedelta(days=duration_years * 365)
+
+    license_data = {
+        "machine_id": machine_id,
+        "issued_at": datetime.utcnow().isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "version": "1.0",
+    }
+    data_string = json.dumps(license_data, sort_keys=True)
+    signature = hmac.new(
+        settings.LICENSE_HMAC_SECRET.encode(),
+        data_string.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+    payload = {
+        "data": license_data,
+        "signature": signature,
+    }
+    return f"POS-LICENSE-{json.dumps(payload).encode('utf-8').hex()}"
+
+
 def generate_machine_fingerprint(machine_id: str) -> str:
     """SHA-256 hash of machine_id with salt."""
     salt = settings.LICENSE_HMAC_SECRET[:16]
