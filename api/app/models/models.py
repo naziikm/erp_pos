@@ -193,9 +193,9 @@ class PosInvoice(Base):
     transaction_id = Column(String(36), unique=True)
     invoice_number = Column(String(50))
     customer_id = Column(Integer, ForeignKey("erp_customer.id", ondelete="RESTRICT"))
-    pos_opening_entry_id = Column(Integer)
-    cashier_id = Column(Integer)
-    pos_profile_id = Column(Integer)
+    pos_opening_entry_id = Column(Integer, ForeignKey("erp_pos_opening_entry.id", ondelete="RESTRICT"))
+    cashier_id = Column(Integer, ForeignKey("erp_user.id", ondelete="RESTRICT"))
+    pos_profile_id = Column(Integer, ForeignKey("erp_pos_profile.id", ondelete="RESTRICT"))
     posting_date = Column(Date)
     posting_time = Column(Time)
     status = Column(Enum("draft", "submitted", "synced", "failed", name="invoice_status_enum"))
@@ -211,19 +211,13 @@ class PosInvoice(Base):
     )
 
     customer = relationship("ERPCustomer", back_populates="invoices")
-    cashier = relationship("ERPUser", back_populates="invoices", foreign_keys=[cashier_id],
-                           primaryjoin="PosInvoice.cashier_id == ERPUser.id")
-    pos_profile = relationship("ERPPosProfile", back_populates="invoices", foreign_keys=[pos_profile_id],
-                               primaryjoin="PosInvoice.pos_profile_id == ERPPosProfile.id")
+    cashier = relationship("ERPUser", back_populates="invoices", foreign_keys=[cashier_id])
+    pos_profile = relationship("ERPPosProfile", back_populates="invoices", foreign_keys=[pos_profile_id])
     pos_opening_entry = relationship("ERPPosOpeningEntry", back_populates="invoices",
-                                     foreign_keys=[pos_opening_entry_id],
-                                     primaryjoin="PosInvoice.pos_opening_entry_id == ERPPosOpeningEntry.id")
+                                     foreign_keys=[pos_opening_entry_id])
     items = relationship("PosInvoiceItem", back_populates="invoice")
     payments = relationship("PosPayment", back_populates="invoice")
     sync_queue = relationship("InvoiceSyncQueue", back_populates="invoice")
-    transaction_logs = relationship("PosTransactionLog", back_populates="invoice",
-                                    foreign_keys="PosTransactionLog.transaction_id",
-                                    primaryjoin="PosInvoice.transaction_id == PosTransactionLog.transaction_id")
 
 
 class PosInvoiceItem(Base):
@@ -266,10 +260,6 @@ class PosTransactionLog(Base):
     status = Column(String(50))
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
-
-    invoice = relationship("PosInvoice", back_populates="transaction_logs",
-                           foreign_keys=[transaction_id],
-                           primaryjoin="PosTransactionLog.transaction_id == PosInvoice.transaction_id")
 
 
 class PosStockReservation(Base):
@@ -346,6 +336,6 @@ class License(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     machine_id = Column(String(255), unique=True)
-    activation_key = Column(String(500))
+    activation_key = Column(Text)
     license_key = Column(String(500))
     expires_at = Column(DateTime)

@@ -21,8 +21,10 @@ def license_activate(req: LicenseActivateRequest, db: Session = Depends(get_db))
         from fastapi import HTTPException
         error_code = str(e)
         msg = "License activation failed"
-        if error_code == "LICENSE_MACHINE_MISMATCH":
-            msg = "This key is already activated on a different machine"
+        if error_code == "LICENSE_INVALID_KEY":
+            msg = "Invalid activation key"
+        elif error_code == "LICENSE_MACHINE_MISMATCH":
+            msg = "This key was generated for a different machine"
         elif error_code == "LICENSE_EXPIRED":
             msg = "This license has expired"
         raise HTTPException(status_code=403, detail={"error_code": error_code, "message": msg})

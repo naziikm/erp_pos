@@ -16,8 +16,10 @@ def trigger_incremental_sync(
     db: Session = Depends(get_db),
 ):
     """Trigger incremental ERP sync."""
-    # Will be implemented in Phase 4
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    from app.services.frappe_sync_service import FrappeSyncService
+    svc = FrappeSyncService()
+    results = svc.run_incremental_sync(db)
+    return {"success": True, "message": "Incremental sync completed", "results": results}
 
 
 @router.post("/erp/full")
@@ -27,8 +29,10 @@ def trigger_full_sync(
     db: Session = Depends(get_db),
 ):
     """Trigger full ERP re-sync."""
-    # Will be implemented in Phase 4
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    from app.services.frappe_sync_service import FrappeSyncService
+    svc = FrappeSyncService()
+    results = svc.run_full_sync(db)
+    return {"success": True, "message": "Full sync completed", "results": results}
 
 
 @router.get("/status", response_model=SyncStatusResponse)

@@ -1,10 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+from decimal import Decimal
+from datetime import datetime
 from app.database import get_db
-from app.schemas.schemas import SessionStatusResponse, SessionInfo, SuccessResponse, SessionCloseRequest
+from app.schemas.schemas import (
+    SessionStatusResponse, SessionInfo, SuccessResponse, SessionCloseRequest,
+    ClosingSummaryResponse, ClosingSummaryPaymentMode,
+)
 from app.dependencies.license_deps import require_valid_license
 from app.dependencies.auth_deps import get_current_user
-from app.models.models import ERPUser, ERPPosOpeningEntry
+from app.models.models import (
+    ERPUser, ERPPosOpeningEntry, ERPModeOfPayment,
+    PosInvoice, PosPayment, InvoiceSyncQueue,
+)
 
 router = APIRouter(prefix="/session", tags=["Session"])
 
@@ -66,15 +75,71 @@ def session_status(
     return SessionStatusResponse(has_session=True, session=session_info)
 
 
-@router.get("/closing-summary")
+@router.get("/closing-summary", response_model=ClosingSummaryResponse)
 def closing_summary(
     current_user: ERPUser = Depends(get_current_user),
     license_payload: dict = Depends(require_valid_license),
     db: Session = Depends(get_db),
 ):
-    """Get shift closing summary."""
-    # Will be fully implemented in Phase 9
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    """Get shift closing summary — totals by payment mode, unsynced count."""
+    entry = get_active_session_required(db, current_user.id)
+
+    # Get all completed invoices for this opening entry
+    invoices = (
+        db.query(PosInvoice)
+        .filter(
+            PosInvoice.pos_opening_entry_id == entry.id,
+            PosInvoice.is_complete == True,
+            PosInvoice.status.in_(["submitted", "synced"]),
+        )
+        .all()
+    )
+    invoice_ids = [inv.id for inv in invoices]
+
+    total_invoices = len(invoices)
+    total_sales = sum((inv.grand_total or Decimal("0")) for inv in invoices)
+
+    # Group payments by mode
+    payments_by_mode: list[ClosingSummaryPaymentMode] = []
+    if invoice_ids:
+        rows = (
+            db.query(
+                PosPayment.mode_of_payment_id,
+                func.sum(PosPayment.amount).label("total"),
+            )
+            .filter(PosPayment.invoice_id.in_(invoice_ids))
+            .group_by(PosPayment.mode_of_payment_id)
+            .all()
+        )
+        for mop_id, total in rows:
+            mop = db.query(ERPModeOfPayment).filter(ERPModeOfPayment.id == mop_id).first()
+            payments_by_mode.append(ClosingSummaryPaymentMode(
+                mode_name=mop.name if mop else f"Mode {mop_id}",
+                expected_amount=total or Decimal("0"),
+            ))
+
+    # Unsynced and failed invoices
+    unsynced_count = 0
+    failed_count = 0
+    if invoice_ids:
+        unsynced_count = (
+            db.query(PosInvoice)
+            .filter(PosInvoice.id.in_(invoice_ids), PosInvoice.status == "submitted")
+            .count()
+        )
+        failed_count = (
+            db.query(PosInvoice)
+            .filter(PosInvoice.id.in_(invoice_ids), PosInvoice.status == "failed")
+            .count()
+        )
+
+    return ClosingSummaryResponse(
+        total_invoices=total_invoices,
+        total_sales=total_sales,
+        payments_by_mode=payments_by_mode,
+        unsynced_count=unsynced_count,
+        failed_count=failed_count,
+    )
 
 
 @router.post("/close", response_model=SuccessResponse)
@@ -84,6 +149,109 @@ def close_session(
     license_payload: dict = Depends(require_valid_license),
     db: Session = Depends(get_db),
 ):
-    """Close POS session and push closing entry to ERP."""
-    # Will be fully implemented in Phase 9
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    """Close POS session and optionally push closing entry to ERP.
+
+    Steps:
+    1. Verify all invoices are synced (or force_close is True)
+    2. Mark the local opening entry as Closed
+    3. Try to push POS Closing Entry to ERPNext (non-blocking)
+    """
+    entry = get_active_session_required(db, current_user.id)
+
+    # Check for unsynced invoices
+    unsynced = (
+        db.query(PosInvoice)
+        .filter(
+            PosInvoice.pos_opening_entry_id == entry.id,
+            PosInvoice.is_complete == True,
+            PosInvoice.status.in_(["submitted", "failed"]),
+        )
+        .count()
+    )
+
+    if unsynced > 0 and not req.force_close:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "UNSYNCED_INVOICES",
+                "message": f"{unsynced} invoice(s) not yet synced to ERP. Use force_close=true to close anyway.",
+            },
+        )
+
+    # Close the entry locally
+    entry.status = "Closed"
+    db.commit()
+
+    # Try to push POS Closing Entry to ERPNext (best-effort)
+    erp_pushed = False
+    try:
+        from app.utils.erp_client import get_erp_client
+        erp = get_erp_client()
+        if erp.check_connectivity():
+            # Build closing entry payload
+            invoices = (
+                db.query(PosInvoice)
+                .filter(
+                    PosInvoice.pos_opening_entry_id == entry.id,
+                    PosInvoice.is_complete == True,
+                )
+                .all()
+            )
+            invoice_ids = [inv.id for inv in invoices]
+            grand_total = sum((inv.grand_total or Decimal("0")) for inv in invoices)
+
+            # Payment mode totals
+            payment_rows = []
+            if invoice_ids:
+                rows = (
+                    db.query(
+                        PosPayment.mode_of_payment_id,
+                        func.sum(PosPayment.amount).label("total"),
+                    )
+                    .filter(PosPayment.invoice_id.in_(invoice_ids))
+                    .group_by(PosPayment.mode_of_payment_id)
+                    .all()
+                )
+                for mop_id, total in rows:
+                    mop = db.query(ERPModeOfPayment).filter(ERPModeOfPayment.id == mop_id).first()
+                    payment_rows.append({
+                        "mode_of_payment": mop.name if mop else "Cash",
+                        "expected_amount": float(total or 0),
+                        "closing_amount": float(
+                            (req.actual_closing_balance or {}).get(
+                                mop.name if mop else "Cash", total or 0
+                            )
+                        ),
+                    })
+
+            closing_payload = {
+                "doctype": "POS Closing Entry",
+                "pos_profile": entry.pos_profile.name if entry.pos_profile else None,
+                "user": current_user.username,
+                "pos_opening_entry": entry.name,
+                "period_end_date": datetime.utcnow().isoformat(),
+                "posting_date": datetime.utcnow().date().isoformat(),
+                "grand_total": float(grand_total),
+                "net_total": float(grand_total),
+                "total_quantity": len(invoices),
+                "payment_reconciliation": payment_rows,
+            }
+            resp = erp.post("/api/resource/POS Closing Entry", json=closing_payload)
+            if resp.status_code in (200, 201):
+                erp_name = resp.json().get("data", {}).get("name")
+                if erp_name:
+                    # Submit the closing entry
+                    erp.post(
+                        "/api/method/frappe.client.submit",
+                        json={"doc": {"doctype": "POS Closing Entry", "name": erp_name}},
+                    )
+                erp_pushed = True
+    except Exception as e:
+        from app.utils.error_logger import log_error
+        log_error(db, "session", "warning", f"Failed to push closing entry to ERP: {e}", exc=e)
+
+    message = "Session closed successfully"
+    if not erp_pushed:
+        message += " (ERP closing entry will be pushed later)"
+
+    return SuccessResponse(success=True, message=message)

@@ -1,5 +1,7 @@
 import hashlib
 import hmac
+import json
+import re
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
@@ -16,14 +18,63 @@ def generate_machine_fingerprint(machine_id: str) -> str:
     return hashlib.sha256(f"{machine_id}{salt}".encode()).hexdigest()
 
 
-def validate_license_key(machine_id: str, license_key: str) -> bool:
-    """Verify the license key using HMAC-SHA256."""
+def _parse_and_validate_activation_key(activation_key: str) -> dict:
+    """Parse a POS-LICENSE-... activation key and verify its HMAC signature.
+
+    Returns the license data dict if valid.
+    Raises ValueError with error code if invalid.
+    """
+    prefix = "POS-LICENSE-"
+    normalized_key = re.sub(r"\s+", "", activation_key).strip()
+    if not normalized_key:
+        raise ValueError("LICENSE_INVALID_KEY")
+
+    if normalized_key.upper().startswith(prefix):
+        data_hex = normalized_key[len(prefix):]
+    else:
+        data_hex = normalized_key
+
+    try:
+        data_json = bytes.fromhex(data_hex).decode("utf-8")
+        license_key = json.loads(data_json)
+    except (ValueError, json.JSONDecodeError):
+        raise ValueError("LICENSE_INVALID_KEY")
+
+    data = license_key.get("data")
+    signature = license_key.get("signature")
+    if not data or not signature:
+        raise ValueError("LICENSE_INVALID_KEY")
+
+    # Verify HMAC-SHA256 signature
+    data_string = json.dumps(data, sort_keys=True)
     expected = hmac.new(
         settings.LICENSE_HMAC_SECRET.encode(),
-        machine_id.encode(),
+        data_string.encode(),
         hashlib.sha256,
     ).hexdigest()
-    return hmac.compare_digest(expected, license_key)
+
+    if not hmac.compare_digest(signature, expected):
+        raise ValueError("LICENSE_INVALID_KEY")
+
+    # Check expiry from the key itself
+    expires_at_str = data.get("expires_at")
+    if expires_at_str:
+        try:
+            exp = datetime.fromisoformat(expires_at_str)
+            # Make naive for comparison if needed
+            if exp.tzinfo is not None:
+                from datetime import timezone
+                now = datetime.now(timezone.utc)
+            else:
+                now = datetime.utcnow()
+            if exp < now:
+                raise ValueError("LICENSE_EXPIRED")
+        except (ValueError, TypeError) as e:
+            if "LICENSE_EXPIRED" in str(e):
+                raise
+            # If date parsing fails, continue without expiry check
+
+    return data
 
 
 def activate_license(db: Session, machine_id: str, activation_key: str) -> dict:
@@ -32,32 +83,54 @@ def activate_license(db: Session, machine_id: str, activation_key: str) -> dict:
     Returns dict with token, expires_at.
     Raises ValueError on invalid key or machine mismatch.
     """
-    # Check if already activated on a different machine
-    existing = db.query(License).filter(License.activation_key == activation_key).first()
-    if existing and existing.machine_id != machine_id:
-        log_error(db, "license", "critical", f"Machine mismatch: key already bound to {existing.machine_id}")
+    # Parse and validate the signed activation key
+    normalized_key = re.sub(r"\s+", "", activation_key).strip()
+    key_data = _parse_and_validate_activation_key(normalized_key)
+
+    # Verify the key's machine_id matches the requesting machine
+    key_machine_id = key_data.get("machine_id", "")
+    if key_machine_id != machine_id:
+        log_error(db, "license", "critical",
+                  f"Machine mismatch: key issued for {key_machine_id}, used by {machine_id}")
         raise ValueError("LICENSE_MACHINE_MISMATCH")
 
-    # If already activated on this machine, return existing token
+    # Check if already activated with this key
+    existing = db.query(License).filter(License.activation_key == normalized_key).first()
     if existing and existing.machine_id == machine_id:
         if existing.expires_at and existing.expires_at < datetime.utcnow():
             raise ValueError("LICENSE_EXPIRED")
         token = _create_license_token(existing.id, machine_id)
         return {"token": token, "expires_at": existing.expires_at, "features": None}
 
-    # Validate key via HMAC
+    # Also check if this machine already has a license
+    existing_machine = db.query(License).filter(License.machine_id == machine_id).first()
+    if existing_machine:
+        # Replace existing license with new one
+        existing_machine.activation_key = normalized_key
+        expires_at_str = key_data.get("expires_at")
+        if expires_at_str:
+            existing_machine.expires_at = datetime.fromisoformat(expires_at_str).replace(tzinfo=None)
+        db.commit()
+        db.refresh(existing_machine)
+        token = _create_license_token(existing_machine.id, machine_id)
+        return {"token": token, "expires_at": existing_machine.expires_at, "features": None}
+
+    # Create new license record
+    expires_at_str = key_data.get("expires_at")
+    if expires_at_str:
+        expires_at = datetime.fromisoformat(expires_at_str).replace(tzinfo=None)
+    else:
+        expires_at = datetime.utcnow() + timedelta(days=365)
+
     license_key = hmac.new(
         settings.LICENSE_HMAC_SECRET.encode(),
-        f"{machine_id}:{activation_key}".encode(),
+        f"{machine_id}:{normalized_key}".encode(),
         hashlib.sha256,
     ).hexdigest()
 
-    # Default expiry: 365 days from now
-    expires_at = datetime.utcnow() + timedelta(days=365)
-
     new_license = License(
         machine_id=machine_id,
-        activation_key=activation_key,
+        activation_key=normalized_key,
         license_key=license_key,
         expires_at=expires_at,
     )

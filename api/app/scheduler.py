@@ -3,6 +3,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from app.config import get_settings
 from app.database import get_db_context
+from app.utils.erp_client import get_erp_client
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -10,47 +11,61 @@ settings = get_settings()
 scheduler = BackgroundScheduler()
 
 
+def _check_erp_online() -> bool:
+    """Quick connectivity check before running ERP-dependent jobs."""
+    try:
+        return get_erp_client().check_connectivity()
+    except Exception:
+        return False
+
+
 def _erp_sync_job():
     """Pull master data from ERP (incremental)."""
+    if not _check_erp_online():
+        logger.info("ERP sync skipped — ERP unreachable (offline mode)")
+        return
+
     logger.info("Running ERP sync job...")
     try:
         with get_db_context() as db:
             from app.services.frappe_sync_service import FrappeSyncService
             svc = FrappeSyncService()
-            svc.run_incremental_sync(db)
-            logger.info("ERP sync job completed.")
-    except NotImplementedError:
-        logger.debug("ERP sync not yet implemented (Phase 4)")
+            results = svc.run_incremental_sync(db)
+            logger.info("ERP sync job completed: %s", results)
     except Exception as e:
         logger.error("ERP sync job failed: %s", e, exc_info=True)
 
 
 def _invoice_push_job():
     """Push local invoices to ERP."""
+    if not _check_erp_online():
+        logger.info("Invoice push skipped — ERP unreachable (offline mode)")
+        return
+
     logger.info("Running invoice push job...")
     try:
         with get_db_context() as db:
             from app.services.invoice_push_service import InvoicePushService
             svc = InvoicePushService()
-            svc.run_invoice_push_job(db)
-            logger.info("Invoice push job completed.")
-    except NotImplementedError:
-        logger.debug("Invoice push not yet implemented (Phase 7)")
+            results = svc.run_invoice_push_job(db)
+            logger.info("Invoice push job completed: %s", results)
     except Exception as e:
         logger.error("Invoice push job failed: %s", e, exc_info=True)
 
 
 def _stock_sync_job():
     """Pull stock levels from ERP."""
+    if not _check_erp_online():
+        logger.info("Stock sync skipped — ERP unreachable (offline mode)")
+        return
+
     logger.info("Running stock sync job...")
     try:
         with get_db_context() as db:
             from app.services.stock_service import StockService
             svc = StockService()
-            svc.sync_stock_levels(db, None, None)
+            svc.sync_stock_levels(db)
             logger.info("Stock sync job completed.")
-    except NotImplementedError:
-        logger.debug("Stock sync not yet implemented (Phase 4)")
     except Exception as e:
         logger.error("Stock sync job failed: %s", e, exc_info=True)
 

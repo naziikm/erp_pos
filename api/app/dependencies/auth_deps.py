@@ -2,22 +2,21 @@ from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
-from passlib.context import CryptContext
+import bcrypt
 from app.database import get_db
 from app.config import get_settings
 from app.models.models import ERPUser
 from app.utils.error_logger import log_error
 
 settings = get_settings()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def create_access_token(user_id: int, machine_id: str | None = None) -> str:
