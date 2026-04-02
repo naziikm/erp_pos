@@ -13,6 +13,27 @@ class _DaySummaryTabState extends State<DaySummaryTab> {
   Map<String, dynamic>? _data;
   bool _loading = true;
 
+  Map<String, dynamic> _paymentModeTotals() {
+    final raw = _data?['payments_by_mode'];
+    if (raw is Map<String, dynamic>) {
+      return raw;
+    }
+    if (raw is List) {
+      final normalized = <String, dynamic>{};
+      for (final entry in raw) {
+        if (entry is Map) {
+          final modeName = entry['mode_name']?.toString();
+          final amount = entry['amount'] ?? entry['expected_amount'];
+          if (modeName != null && modeName.isNotEmpty) {
+            normalized[modeName] = amount ?? 0;
+          }
+        }
+      }
+      return normalized;
+    }
+    return <String, dynamic>{};
+  }
+
   @override
   void initState() {
     super.initState();
@@ -47,8 +68,7 @@ class _DaySummaryTabState extends State<DaySummaryTab> {
       );
     }
 
-    final payments =
-        (_data!['payments_by_mode'] as Map<String, dynamic>?) ?? {};
+    final payments = _paymentModeTotals();
 
     return RefreshIndicator(
       onRefresh: _load,

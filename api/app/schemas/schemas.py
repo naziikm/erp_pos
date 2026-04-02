@@ -186,6 +186,10 @@ class InvoiceResponse(BaseModel):
     total_discount: Optional[Decimal] = None
     grand_total: Optional[Decimal] = None
     is_complete: bool = False
+    sync_status: Optional[str] = None
+    sync_attempts: Optional[int] = None
+    last_sync_attempt_at: Optional[datetime] = None
+    sync_error: Optional[str] = None
     items: list[InvoiceItemResponse] = []
     payments: list[PaymentResponse] = []
 

@@ -295,6 +295,11 @@ def _build_invoice_response(db: Session, invoice: PosInvoice) -> InvoiceResponse
     """Build the full invoice response with items and payments."""
     items = db.query(PosInvoiceItem).filter(PosInvoiceItem.invoice_id == invoice.id).all()
     payments = db.query(PosPayment).filter(PosPayment.invoice_id == invoice.id).all()
+    sync_item = (
+        db.query(InvoiceSyncQueue)
+        .filter(InvoiceSyncQueue.invoice_id == invoice.id)
+        .first()
+    )
 
     return InvoiceResponse(
         id=invoice.id,
@@ -308,6 +313,10 @@ def _build_invoice_response(db: Session, invoice: PosInvoice) -> InvoiceResponse
         total_discount=invoice.total_discount,
         grand_total=invoice.grand_total,
         is_complete=invoice.is_complete,
+        sync_status=sync_item.status if sync_item else None,
+        sync_attempts=sync_item.attempts if sync_item else None,
+        last_sync_attempt_at=sync_item.last_attempt_at if sync_item else None,
+        sync_error=sync_item.error_response if sync_item else None,
         items=[
             InvoiceItemResponse(
                 id=i.id, item_code=i.item_code, item_name=i.item_name,

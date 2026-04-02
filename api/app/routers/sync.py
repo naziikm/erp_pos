@@ -35,6 +35,20 @@ def trigger_full_sync(
     return {"success": True, "message": "Full sync completed", "results": results}
 
 
+@router.post("/invoice-push")
+def trigger_invoice_push(
+    current_user: ERPUser = Depends(get_current_user),
+    license_payload: dict = Depends(require_valid_license),
+    db: Session = Depends(get_db),
+):
+    """Trigger an immediate invoice push batch."""
+    from app.services.invoice_push_service import InvoicePushService
+
+    svc = InvoicePushService()
+    results = svc.run_invoice_push_job(db)
+    return {"success": True, "message": "Invoice push completed", "results": results}
+
+
 @router.get("/status", response_model=SyncStatusResponse)
 def get_sync_status(
     current_user: ERPUser = Depends(get_current_user),
@@ -123,3 +137,41 @@ def retry_invoice(
         db.commit()
 
     return SuccessResponse(success=True, message="Invoice re-queued for sync")
+
+
+@router.post("/retry-invoice/{invoice_id}/push", response_model=SuccessResponse)
+def retry_invoice_now(
+    invoice_id: int,
+    current_user: ERPUser = Depends(get_current_user),
+    license_payload: dict = Depends(require_valid_license),
+    db: Session = Depends(get_db),
+):
+    """Re-queue and immediately attempt to push a failed invoice."""
+    from app.services.invoice_push_service import InvoicePushService
+
+    queue_item = (
+        db.query(InvoiceSyncQueue)
+        .filter(InvoiceSyncQueue.invoice_id == invoice_id)
+        .first()
+    )
+    if not queue_item:
+        raise HTTPException(status_code=404, detail="Invoice not found in queue")
+
+    queue_item.status = "pending"
+    queue_item.error_response = None
+    db.commit()
+
+    invoice = db.query(PosInvoice).filter(PosInvoice.id == invoice_id).first()
+    if invoice and invoice.status == "failed":
+        invoice.status = "submitted"
+        db.commit()
+
+    svc = InvoicePushService()
+    try:
+        svc.push_invoice_now(db, invoice_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return SuccessResponse(success=True, message="Invoice synced successfully")

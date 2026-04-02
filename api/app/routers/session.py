@@ -162,7 +162,7 @@ def closing_summary(
         .filter(
             PosInvoice.pos_opening_entry_id == entry.id,
             PosInvoice.is_complete == True,
-            PosInvoice.status.in_(["submitted", "synced"]),
+            PosInvoice.status.in_(["submitted", "synced", "failed"]),
         )
         .all()
     )

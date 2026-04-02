@@ -33,6 +33,27 @@ class _ClosingScreenState extends ConsumerState<ClosingScreen> {
     super.dispose();
   }
 
+  Map<String, dynamic> _paymentModeTotals() {
+    final raw = _summary?['payments_by_mode'];
+    if (raw is Map<String, dynamic>) {
+      return raw;
+    }
+    if (raw is List) {
+      final normalized = <String, dynamic>{};
+      for (final entry in raw) {
+        if (entry is Map) {
+          final modeName = entry['mode_name']?.toString();
+          final amount = entry['expected_amount'];
+          if (modeName != null && modeName.isNotEmpty) {
+            normalized[modeName] = amount ?? 0;
+          }
+        }
+      }
+      return normalized;
+    }
+    return <String, dynamic>{};
+  }
+
   Future<void> _loadSummary() async {
     setState(() => _loading = true);
     try {
@@ -58,7 +79,10 @@ class _ClosingScreenState extends ConsumerState<ClosingScreen> {
     });
 
     try {
-      final payload = {'actual_cash': actualCash};
+      final payload = {
+        'actual_closing_balance': {'Cash': actualCash},
+        'force_close': true,
+      };
       await _sessionService.closeSession(payload);
       ref.read(sessionProvider.notifier).clearSession();
       if (mounted) {
@@ -82,6 +106,8 @@ class _ClosingScreenState extends ConsumerState<ClosingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final paymentsByMode = _paymentModeTotals();
+
     return Scaffold(
       appBar: AppBar(title: const Text('Close Session')),
       body: _loading
@@ -130,13 +156,9 @@ class _ClosingScreenState extends ConsumerState<ClosingScreen> {
                             style: Theme.of(context).textTheme.titleSmall,
                           ),
                           const SizedBox(height: 8),
-                          ...(_summary!['payments_by_mode']
-                                      as Map<String, dynamic>? ??
-                                  {})
-                              .entries
-                              .map(
-                                (e) => _SummaryRow(e.key, '\u20B9 ${e.value}'),
-                              ),
+                          ...paymentsByMode.entries.map(
+                            (e) => _SummaryRow(e.key, '\u20B9 ${e.value}'),
+                          ),
                         ],
                       ),
                     ),
@@ -196,9 +218,7 @@ class _ClosingScreenState extends ConsumerState<ClosingScreen> {
                               builder: (_) {
                                 final actual =
                                     double.tryParse(_cashController.text) ?? 0;
-                                final expected =
-                                    (_summary!['payments_by_mode']?['Cash'] ??
-                                    0);
+                                final expected = paymentsByMode['Cash'] ?? 0;
                                 final expectedVal = expected is num
                                     ? expected.toDouble()
                                     : double.tryParse(expected.toString()) ?? 0;
