@@ -41,7 +41,8 @@ def _update_sync_log(db: Session, table_name: str, status: str,
         log = SyncLog(table_name=table_name)
         db.add(log)
     log.status = status
-    log.last_synced_at = datetime.utcnow()
+    if status == "success":
+        log.last_synced_at = datetime.utcnow()
     log.total_records = total_records
     log.error_message = error_message
     db.flush()
