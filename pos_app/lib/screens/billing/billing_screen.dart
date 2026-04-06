@@ -165,6 +165,71 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
       padding: const EdgeInsets.all(10),
       child: Column(
         children: [
+          // Customer search / selector on the left panel
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: InkWell(
+              onTap: () {
+                showDialog(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: const Text('Select Customer'),
+                    content: CustomerSelector(
+                      selectedCustomer: _selectedCustomer,
+                      onCustomerSelected: (c) {
+                        setState(() => _selectedCustomer = c);
+                        Navigator.of(context).pop();
+                      },
+                    ),
+                  ),
+                );
+              },
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.person_search, color: AppTheme.primaryColor),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _selectedCustomer == null
+                            ? 'Search customer...'
+                            : (_selectedCustomer?['display_name'] ??
+                                  _selectedCustomer?['name'] ??
+                                  ''),
+                        style: TextStyle(
+                          color: _selectedCustomer == null
+                              ? Colors.grey.shade600
+                              : Colors.black87,
+                          fontWeight: _selectedCustomer == null
+                              ? FontWeight.normal
+                              : FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (_selectedCustomer != null)
+                      IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () =>
+                            setState(() => _selectedCustomer = null),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
           // Cart list
           Expanded(
             child: Container(
@@ -385,12 +450,6 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                   onChanged: _filterItems,
                 ),
               ),
-              const SizedBox(width: 8),
-              IconButton.filledTonal(
-                onPressed: _openBarcodeScanner,
-                icon: const Icon(Icons.qr_code_scanner),
-                tooltip: 'Scan Barcode',
-              ),
             ],
           ),
         ),
@@ -412,32 +471,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
             }).toList(),
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.grey.shade200),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.restaurant_menu, color: AppTheme.primaryColor),
-                const SizedBox(width: 8),
-                const Text(
-                  'Menu Items',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-                const Spacer(),
-                Text(
-                  '${_filteredItems.length} items',
-                  style: TextStyle(color: Colors.grey.shade600),
-                ),
-              ],
-            ),
-          ),
-        ),
+
         Expanded(
           child: _loadingItems
               ? const Center(child: CircularProgressIndicator())
@@ -447,7 +481,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                     maxCrossAxisExtent: 150,
-                    childAspectRatio: 0.82,
+                    childAspectRatio: 1.10,
                     crossAxisSpacing: 8,
                     mainAxisSpacing: 8,
                   ),
@@ -613,27 +647,20 @@ class _ItemCard extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(6),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Center(
-                child: Icon(
-                  Icons.restaurant,
-                  color: Colors.grey.shade400,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(height: 6),
               Text(
                 item['item_name'] ?? '',
                 style: const TextStyle(
                   fontWeight: FontWeight.w600,
                   fontSize: 12,
                 ),
-                maxLines: 2,
+                maxLines: 3,
                 overflow: TextOverflow.ellipsis,
               ),
+              const SizedBox(height: 6),
               const Spacer(),
               Row(
                 children: [
