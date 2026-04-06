@@ -51,10 +51,9 @@ def _update_sync_log(db: Session, table_name: str, status: str,
 # ─── Individual Doctype Sync Functions ────────────────────────────────────────
 
 
-def _sync_role_profiles(db: Session, erp: ERPClient, last_synced: datetime | None):
+def _sync_role_profiles(db: Session, erp: ERPClient):
     fields = ["name", "modified"]
-    filters = [["modified", ">", last_synced.isoformat()]] if last_synced else None
-    rows = _get_erp_list(erp, "Role Profile", fields, filters)
+    rows = _get_erp_list(erp, "Role Profile", fields)
     for row in rows:
         existing = db.query(ERPRoleProfile).filter(ERPRoleProfile.name == row["name"]).first()
         if existing:
@@ -70,10 +69,9 @@ def _sync_role_profiles(db: Session, erp: ERPClient, last_synced: datetime | Non
     return len(rows)
 
 
-def _sync_users(db: Session, erp: ERPClient, last_synced: datetime | None):
+def _sync_users(db: Session, erp: ERPClient):
     fields = ["name", "email", "full_name", "role_profile_name", "enabled", "modified"]
-    filters = [["modified", ">", last_synced.isoformat()]] if last_synced else None
-    rows = _get_erp_list(erp, "User", fields, filters)
+    rows = _get_erp_list(erp, "User", fields)
     for row in rows:
         # Resolve role profile FK
         rp = None
@@ -102,10 +100,9 @@ def _sync_users(db: Session, erp: ERPClient, last_synced: datetime | None):
     return len(rows)
 
 
-def _sync_item_groups(db: Session, erp: ERPClient, last_synced: datetime | None):
+def _sync_item_groups(db: Session, erp: ERPClient):
     fields = ["name", "parent_item_group", "modified"]
-    filters = [["modified", ">", last_synced.isoformat()]] if last_synced else None
-    rows = _get_erp_list(erp, "Item Group", fields, filters)
+    rows = _get_erp_list(erp, "Item Group", fields)
     for row in rows:
         existing = db.query(ERPItemGroup).filter(ERPItemGroup.name == row["name"]).first()
         if existing:
@@ -123,11 +120,10 @@ def _sync_item_groups(db: Session, erp: ERPClient, last_synced: datetime | None)
     return len(rows)
 
 
-def _sync_items(db: Session, erp: ERPClient, last_synced: datetime | None):
+def _sync_items(db: Session, erp: ERPClient):
     fields = ["name", "item_name", "item_group", "stock_uom", "has_serial_no",
               "is_stock_item", "modified"]
-    filters = [["modified", ">", last_synced.isoformat()]] if last_synced else None
-    rows = _get_erp_list(erp, "Item", fields, filters)
+    rows = _get_erp_list(erp, "Item", fields)
     for row in rows:
         # Resolve item group FK
         ig = None
@@ -174,10 +170,9 @@ def _sync_items(db: Session, erp: ERPClient, last_synced: datetime | None):
     return len(rows)
 
 
-def _sync_price_lists(db: Session, erp: ERPClient, last_synced: datetime | None):
+def _sync_price_lists(db: Session, erp: ERPClient):
     fields = ["name", "currency", "buying", "selling", "modified"]
-    filters = [["modified", ">", last_synced.isoformat()]] if last_synced else None
-    rows = _get_erp_list(erp, "Price List", fields, filters)
+    rows = _get_erp_list(erp, "Price List", fields)
     for row in rows:
         existing = db.query(ERPPriceList).filter(ERPPriceList.name == row["name"]).first()
         if existing:
@@ -199,11 +194,10 @@ def _sync_price_lists(db: Session, erp: ERPClient, last_synced: datetime | None)
     return len(rows)
 
 
-def _sync_item_prices(db: Session, erp: ERPClient, last_synced: datetime | None):
+def _sync_item_prices(db: Session, erp: ERPClient):
     fields = ["name", "item_code", "price_list", "price_list_rate",
               "valid_from", "valid_upto", "modified"]
-    filters = [["modified", ">", last_synced.isoformat()]] if last_synced else None
-    rows = _get_erp_list(erp, "Item Price", fields, filters)
+    rows = _get_erp_list(erp, "Item Price", fields)
     for row in rows:
         item = db.query(ERPItem).filter(ERPItem.item_code == row.get("item_code")).first()
         pl = db.query(ERPPriceList).filter(ERPPriceList.name == row.get("price_list")).first()
@@ -240,11 +234,10 @@ def _sync_item_prices(db: Session, erp: ERPClient, last_synced: datetime | None)
     return len(rows)
 
 
-def _sync_customers(db: Session, erp: ERPClient, last_synced: datetime | None):
+def _sync_customers(db: Session, erp: ERPClient):
     fields = ["name", "customer_name", "customer_group", "tax_id",
               "default_price_list", "modified"]
-    filters = [["modified", ">", last_synced.isoformat()]] if last_synced else None
-    rows = _get_erp_list(erp, "Customer", fields, filters)
+    rows = _get_erp_list(erp, "Customer", fields)
     for row in rows:
         pl = None
         if row.get("default_price_list"):
@@ -272,10 +265,9 @@ def _sync_customers(db: Session, erp: ERPClient, last_synced: datetime | None):
     return len(rows)
 
 
-def _sync_modes_of_payment(db: Session, erp: ERPClient, last_synced: datetime | None):
+def _sync_modes_of_payment(db: Session, erp: ERPClient):
     fields = ["name", "type", "modified"]
-    filters = [["modified", ">", last_synced.isoformat()]] if last_synced else None
-    rows = _get_erp_list(erp, "Mode of Payment", fields, filters)
+    rows = _get_erp_list(erp, "Mode of Payment", fields)
     for row in rows:
         mop_type = row.get("type", "General")
         if mop_type not in ("Cash", "Bank", "General"):
@@ -297,14 +289,13 @@ def _sync_modes_of_payment(db: Session, erp: ERPClient, last_synced: datetime | 
     return len(rows)
 
 
-def _sync_pos_profiles(db: Session, erp: ERPClient, last_synced: datetime | None):
+def _sync_pos_profiles(db: Session, erp: ERPClient):
     # Core POS Profile fields used by the POS app. We intentionally keep
     # this field list minimal because some ERPNext versions do not expose
     # all flags (like validate_stock) via list queries and may respond
     # with HTTP 417 when unknown fields are requested.
     fields = ["name", "company", "warehouse", "selling_price_list", "modified"]
-    filters = [["modified", ">", last_synced.isoformat()]] if last_synced else None
-    rows = _get_erp_list(erp, "POS Profile", fields, filters)
+    rows = _get_erp_list(erp, "POS Profile", fields)
     for row in rows:
         pl = None
         if row.get("selling_price_list"):
@@ -349,13 +340,12 @@ def _sync_pos_profiles(db: Session, erp: ERPClient, last_synced: datetime | None
     return len(rows)
 
 
-def _sync_pos_opening_entries(db: Session, erp: ERPClient, last_synced: datetime | None):
+def _sync_pos_opening_entries(db: Session, erp: ERPClient):
     """Sync POS Opening Entry records from ERPNext.
 
     Notes:
     - Uses period_start_date from ERPNext to populate period_start_date locally
     - Treats only explicit "Open" as open; everything else becomes "Closed"
-    - Relies on modified timestamp for incremental sync
     """
 
     # ERPNext POS Opening Entry fields:
@@ -367,10 +357,7 @@ def _sync_pos_opening_entries(db: Session, erp: ERPClient, last_synced: datetime
     # - modified (Datetime)
     fields = ["name", "pos_profile", "user", "period_start_date", "status", "modified"]
 
-    # Incremental sync based on modified timestamp
-    filters = [["modified", ">", last_synced.isoformat()]] if last_synced else None
-
-    rows = _get_erp_list(erp, "POS Opening Entry", fields, filters)
+    rows = _get_erp_list(erp, "POS Opening Entry", fields)
     for row in rows:
         profile = db.query(ERPPosProfile).filter(ERPPosProfile.name == row.get("pos_profile")).first()
         user = db.query(ERPUser).filter(ERPUser.username == row.get("user")).first()
@@ -456,14 +443,8 @@ class FrappeSyncService:
         for table_name, doctype_label, model_cls, sync_fn in _SYNC_MAP:
             _update_sync_log(db, table_name, "running")
             try:
-                # Get last synced time (skip for full sync)
-                last_synced = None
-                if not full:
-                    log = db.query(SyncLog).filter(SyncLog.table_name == table_name).first()
-                    if log and log.last_synced_at:
-                        last_synced = log.last_synced_at
-
-                count = sync_fn(db, self.erp, last_synced)
+                # Synchronize all records (full-check upsert)
+                count = sync_fn(db, self.erp)
                 total = db.query(model_cls).count()
                 _update_sync_log(db, table_name, "success", total_records=total)
                 db.commit()

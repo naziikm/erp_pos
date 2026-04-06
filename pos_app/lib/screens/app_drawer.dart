@@ -4,6 +4,7 @@ import 'package:pos_app/providers/auth_provider.dart';
 import 'package:pos_app/screens/closing_screen.dart';
 import 'package:pos_app/screens/error_log_screen.dart';
 import 'package:pos_app/screens/reports/reports_screen.dart';
+import 'package:pos_app/screens/sync_settings_screen.dart';
 import 'package:pos_app/services/auth_service.dart';
 import 'package:pos_app/services/sync_service.dart';
 
@@ -66,6 +67,17 @@ class AppDrawer extends ConsumerWidget {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const ErrorLogScreen()),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.settings),
+            title: const Text('Sync Settings'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SyncSettingsScreen()),
               );
             },
           ),

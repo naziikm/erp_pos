@@ -32,4 +32,18 @@ class SyncService {
     final response = await _api.dio.post('/sync/retry-invoice/$invoiceId');
     return response.data;
   }
+
+  // --- Settings ---
+
+  Future<List<dynamic>> getSettings() async {
+    final response = await _api.dio.get('/settings/');
+    return response.data as List<dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updateSetting(String key, String value) async {
+    final response = await _api.dio.patch('/settings/$key', data: {
+      'value': value,
+    });
+    return response.data;
+  }
 }

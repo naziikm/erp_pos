@@ -70,34 +70,77 @@ def _stock_sync_job():
         logger.error("Stock sync job failed: %s", e, exc_info=True)
 
 
+def _get_interval_setting(key: str, default: int) -> int:
+    """Read a numeric setting from the database or fall back to default."""
+    try:
+        from app.models.models import SystemSetting
+        with get_db_context() as db:
+            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+            if setting and setting.value:
+                return int(setting.value)
+    except Exception:
+        pass
+    return default
+
+
 def start_scheduler():
     """Register and start all background jobs."""
+    # Master Sync (minutes)
+    erp_interval = _get_interval_setting("erp_sync_interval_mins", settings.ERP_SYNC_INTERVAL_MINUTES)
     scheduler.add_job(
         _erp_sync_job,
-        trigger=IntervalTrigger(minutes=settings.ERP_SYNC_INTERVAL_MINUTES),
+        trigger=IntervalTrigger(minutes=erp_interval),
         id="erp_sync",
         max_instances=1,
         replace_existing=True,
     )
 
+    # Invoice Push (seconds)
+    invoice_interval = _get_interval_setting("invoice_sync_interval_secs", settings.INVOICE_SYNC_INTERVAL_SECONDS)
     scheduler.add_job(
         _invoice_push_job,
-        trigger=IntervalTrigger(seconds=settings.INVOICE_SYNC_INTERVAL_SECONDS),
+        trigger=IntervalTrigger(seconds=invoice_interval),
         id="invoice_push",
         max_instances=1,
         replace_existing=True,
     )
 
+    # Stock Sync (minutes)
+    stock_interval = _get_interval_setting("stock_sync_interval_mins", settings.STOCK_SYNC_INTERVAL_MINUTES)
     scheduler.add_job(
         _stock_sync_job,
-        trigger=IntervalTrigger(minutes=settings.STOCK_SYNC_INTERVAL_MINUTES),
+        trigger=IntervalTrigger(minutes=stock_interval),
         id="stock_sync",
         max_instances=1,
         replace_existing=True,
     )
 
     scheduler.start()
-    logger.info("Scheduler started with %d jobs.", len(scheduler.get_jobs()))
+    logger.info("Scheduler started with %d jobs (ERP: %dm, Inv: %ds, Stock: %dm).", 
+               len(scheduler.get_jobs()), erp_interval, invoice_interval, stock_interval)
+
+
+def reload_scheduler_settings():
+    """Reload all intervals from the database and reschedule active jobs."""
+    if not scheduler.running:
+        return
+
+    logger.info("Reloading scheduler settings from database...")
+    
+    # Master Sync
+    erp_interval = _get_interval_setting("erp_sync_interval_mins", settings.ERP_SYNC_INTERVAL_MINUTES)
+    scheduler.reschedule_job("erp_sync", trigger=IntervalTrigger(minutes=erp_interval))
+
+    # Invoice Push
+    invoice_interval = _get_interval_setting("invoice_sync_interval_secs", settings.INVOICE_SYNC_INTERVAL_SECONDS)
+    scheduler.reschedule_job("invoice_push", trigger=IntervalTrigger(seconds=invoice_interval))
+
+    # Stock Sync
+    stock_interval = _get_interval_setting("stock_sync_interval_mins", settings.STOCK_SYNC_INTERVAL_MINUTES)
+    scheduler.reschedule_job("stock_sync", trigger=IntervalTrigger(minutes=stock_interval))
+
+    logger.info("Scheduler jobs rescheduled (ERP: %dm, Inv: %ds, Stock: %dm).", 
+               erp_interval, invoice_interval, stock_interval)
 
 
 def stop_scheduler():

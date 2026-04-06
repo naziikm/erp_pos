@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:pos_app/services/sync_service.dart';
@@ -14,27 +15,50 @@ class _SyncHealthTabState extends State<SyncHealthTab> {
   Map<String, dynamic>? _status;
   Map<String, dynamic>? _queue;
   bool _loading = true;
+  bool _isAutoRefreshing = false;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // Start auto-refresh timer (every 7 seconds)
+    _refreshTimer = Timer.periodic(const Duration(seconds: 7), (_) => _autoRefresh());
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
     setState(() => _loading = true);
+    await _fetchData();
+  }
+
+  Future<void> _autoRefresh() async {
+    if (_loading || _isAutoRefreshing) return;
+    setState(() => _isAutoRefreshing = true);
+    await _fetchData();
+    if (mounted) setState(() => _isAutoRefreshing = false);
+  }
+
+  Future<void> _fetchData() async {
     try {
       final results = await Future.wait([
         _syncService.getSyncStatus(),
         _syncService.getInvoiceQueue(),
       ]);
-      setState(() {
-        _status = results[0];
-        _queue = results[1];
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _status = results[0];
+          _queue = results[1];
+          _loading = false;
+        });
+      }
     } catch (e) {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 

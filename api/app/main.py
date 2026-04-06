@@ -8,7 +8,9 @@ from sqlalchemy import text
 from app.config import get_settings
 from app.database import engine, SessionLocal
 from app.scheduler import start_scheduler, stop_scheduler
-from app.routers import licensing, auth, sync, session, billing, reports
+from app.routers import (
+    licensing, auth, sync, session, billing, reports, settings as settings_router
+)
 from app.utils.erp_client import ERPClient
 
 settings = get_settings()
@@ -104,6 +106,7 @@ app.include_router(sync.router, prefix="/api/v1")
 app.include_router(session.router, prefix="/api/v1")
 app.include_router(billing.router, prefix="/api/v1")
 app.include_router(reports.router, prefix="/api/v1")
+app.include_router(settings_router.router, prefix="/api/v1")
 
 
 # Health check (no auth required)

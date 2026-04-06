@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
 from sqlalchemy.orm import Session
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.schemas.schemas import SyncStatusResponse, SyncStatusItem, InvoiceQueueResponse, InvoiceResponse, SuccessResponse
 from app.dependencies.license_deps import require_valid_license
 from app.dependencies.auth_deps import get_current_user
@@ -9,44 +9,60 @@ from app.models.models import ERPUser, SyncLog, InvoiceSyncQueue, PosInvoice
 router = APIRouter(prefix="/sync", tags=["Sync"])
 
 
-@router.post("/erp")
-def trigger_incremental_sync(
-    current_user: ERPUser = Depends(get_current_user),
-    license_payload: dict = Depends(require_valid_license),
-    db: Session = Depends(get_db),
-):
-    """Trigger incremental ERP sync."""
+def run_erp_sync_task(full: bool):
     from app.services.frappe_sync_service import FrappeSyncService
-    svc = FrappeSyncService()
-    results = svc.run_incremental_sync(db)
-    return {"success": True, "message": "Incremental sync completed", "results": results}
+    db = SessionLocal()
+    try:
+        svc = FrappeSyncService()
+        if full:
+            svc.run_full_sync(db)
+        else:
+            svc.run_incremental_sync(db)
+    finally:
+        db.close()
 
 
-@router.post("/erp/full")
-def trigger_full_sync(
-    current_user: ERPUser = Depends(get_current_user),
-    license_payload: dict = Depends(require_valid_license),
-    db: Session = Depends(get_db),
-):
-    """Trigger full ERP re-sync."""
-    from app.services.frappe_sync_service import FrappeSyncService
-    svc = FrappeSyncService()
-    results = svc.run_full_sync(db)
-    return {"success": True, "message": "Full sync completed", "results": results}
-
-
-@router.post("/invoice-push")
-def trigger_invoice_push(
-    current_user: ERPUser = Depends(get_current_user),
-    license_payload: dict = Depends(require_valid_license),
-    db: Session = Depends(get_db),
-):
-    """Trigger an immediate invoice push batch."""
+def run_invoice_push_task():
     from app.services.invoice_push_service import InvoicePushService
+    db = SessionLocal()
+    try:
+        svc = InvoicePushService()
+        svc.run_invoice_push_job(db)
+    finally:
+        db.close()
 
-    svc = InvoicePushService()
-    results = svc.run_invoice_push_job(db)
-    return {"success": True, "message": "Invoice push completed", "results": results}
+
+@router.post("/erp", status_code=status.HTTP_202_ACCEPTED, response_model=SuccessResponse)
+def trigger_incremental_sync(
+    background_tasks: BackgroundTasks,
+    current_user: ERPUser = Depends(get_current_user),
+    license_payload: dict = Depends(require_valid_license),
+):
+    """Trigger incremental ERP sync in the background."""
+    background_tasks.add_task(run_erp_sync_task, full=False)
+    return SuccessResponse(success=True, message="Incremental sync started in background")
+
+
+@router.post("/erp/full", status_code=status.HTTP_202_ACCEPTED, response_model=SuccessResponse)
+def trigger_full_sync(
+    background_tasks: BackgroundTasks,
+    current_user: ERPUser = Depends(get_current_user),
+    license_payload: dict = Depends(require_valid_license),
+):
+    """Trigger full ERP re-sync in the background."""
+    background_tasks.add_task(run_erp_sync_task, full=True)
+    return SuccessResponse(success=True, message="Full sync started in background")
+
+
+@router.post("/invoice-push", status_code=status.HTTP_202_ACCEPTED, response_model=SuccessResponse)
+def trigger_invoice_push(
+    background_tasks: BackgroundTasks,
+    current_user: ERPUser = Depends(get_current_user),
+    license_payload: dict = Depends(require_valid_license),
+):
+    """Trigger an immediate invoice push batch in the background."""
+    background_tasks.add_task(run_invoice_push_task)
+    return SuccessResponse(success=True, message="Invoice push started in background")
 
 
 @router.get("/status", response_model=SyncStatusResponse)

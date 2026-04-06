@@ -33,6 +33,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
   Map<String, dynamic>? _selectedCustomer;
   bool _loadingItems = true;
   Timer? _searchDebounce;
+  Timer? _refreshTimer;
   int? _selectedCartItemId;
   String _numpadBuffer = '';
 
@@ -40,17 +41,30 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
   void initState() {
     super.initState();
     _loadItems();
+    // Refresh items from DB every 10 seconds to catch background sync updates
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _autoRefreshItems());
   }
 
   @override
   void dispose() {
     _searchController.dispose();
     _searchDebounce?.cancel();
+    _refreshTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _autoRefreshItems() async {
+    // Only refresh if not already loading and not searching
+    if (_loadingItems || _searchController.text.isNotEmpty) return;
+    await _fetchItems();
   }
 
   Future<void> _loadItems() async {
     setState(() => _loadingItems = true);
+    await _fetchItems();
+  }
+
+  Future<void> _fetchItems() async {
     try {
       final items = await _billingService.getItems();
       final groups = <String>{'All'};
@@ -58,14 +72,19 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
         final g = item['item_group'];
         if (g != null && g.toString().isNotEmpty) groups.add(g.toString());
       }
-      setState(() {
-        _allItems = items.cast<Map<String, dynamic>>();
-        _filteredItems = _allItems;
-        _itemGroups = groups.toList();
-        _loadingItems = false;
-      });
+      if (mounted) {
+        setState(() {
+          _allItems = items.cast<Map<String, dynamic>>();
+          // If we are not searching, update the filtered list too
+          if (_searchController.text.isEmpty) {
+            _filterItems(''); // This will reset filteredItems to allItems
+          }
+          _itemGroups = groups.toList();
+          _loadingItems = false;
+        });
+      }
     } catch (e) {
-      setState(() => _loadingItems = false);
+      if (mounted) setState(() => _loadingItems = false);
     }
   }
 
